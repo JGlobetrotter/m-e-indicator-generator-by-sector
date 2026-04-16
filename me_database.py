@@ -3,6 +3,45 @@ from models import MEIndicator
 _counter = 0
 
 
+def _derive_source_url(framework_source: str) -> str:
+    """Return the canonical URL for the primary organisation behind a framework source."""
+    fs = framework_source.upper()
+    # More-specific orgs checked before generic SDG catch-all
+    if "OHCHR" in fs:
+        return "https://ohchr.org"
+    if "GRI" in fs:
+        return "https://globalreporting.org"
+    if "UNHCR" in fs or "GCR" in fs:
+        return "https://unhcr.org"
+    if "WFP" in fs:
+        return "https://wfp.org"
+    if "ILO" in fs:
+        return "https://ilo.org"
+    if "UNICEF" in fs:
+        return "https://unicef.org"
+    if "IOM" in fs:
+        return "https://iom.int"
+    if "FAO" in fs:
+        return "https://fao.org"
+    if "TCFD" in fs:
+        return "https://tcfdhub.org"
+    if "SASB" in fs:
+        return "https://sasb.org"
+    if "GCF" in fs:
+        return "https://greenclimate.fund"
+    if "SDG" in fs:
+        return "https://sdgs.un.org"
+    if "USAID" in fs:
+        return "https://usaid.gov"
+    if "WORLD BANK" in fs:
+        return "https://worldbank.org"
+    if "IPC" in fs:
+        return "https://ipcinfo.org"
+    if "BONN" in fs:
+        return "https://bonnchallenge.org"
+    return ""
+
+
 def _id() -> str:
     global _counter
     _counter += 1
@@ -103,6 +142,12 @@ ME_INDICATORS: list[MEIndicator] = [
     MEIndicator(id=_id(), title="Living wage compliance", definition="Percentage of workforce receiving at or above the living wage threshold", measurement_method="Payroll analysis / Benchmarking", unit="%", frequency="annually", suggested_data_source="HR records / Living wage benchmarks", framework_source="GRI 202 / SA8000", sector="Private Sector / ESG / Supply Chain", category="Impact"),
     MEIndicator(id=_id(), title="Community investment as % of revenue", definition="Percentage of revenue allocated to community development programs", measurement_method="Financial records", unit="%", frequency="annually", suggested_data_source="CSR / Finance reports", framework_source="GRI 413 / SDG 17", sector="Private Sector / ESG / Supply Chain", category="Output"),
 ]
+
+
+# Populate source_url from framework_source for every indicator
+for _ind in ME_INDICATORS:
+    if not _ind.source_url:
+        _ind.source_url = _derive_source_url(_ind.framework_source)
 
 
 def get_indicators_for_sector(sector: str) -> list[MEIndicator]:
