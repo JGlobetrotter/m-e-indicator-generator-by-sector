@@ -1,5 +1,5 @@
 """
-M&E Indicator Generator — Streamlit app
+Impact Measurement Generator — Streamlit app
 Run with:  streamlit run app.py
 """
 
@@ -66,7 +66,7 @@ CATEGORY_BADGE_CSS = {
 # ---------------------------------------------------------------------------
 
 st.set_page_config(
-    page_title="M&E Indicator Generator",
+    page_title="Impact Measurement Generator",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -122,28 +122,28 @@ def _get_selected_indicators() -> list[SelectedIndicator]:
 # ---------------------------------------------------------------------------
 
 with st.sidebar:
-    st.title("📊 M&E Generator")
+    st.title("Impact Measurement Generator")
     st.divider()
     page = st.radio(
         "Navigate",
-        ["M&E Indicator Generator", "KPI Library"],
+        ["M&E Indicator Library", "KPI Library"],
         label_visibility="collapsed",
     )
     st.divider()
     st.caption("Evidence-based indicators aligned with SDGs, USAID, World Bank & OECD DAC frameworks.")
 
 # ===========================================================================
-# PAGE 1 — M&E Indicator Generator
+# PAGE 1 — M&E Indicator Library
 # ===========================================================================
 
-if page == "M&E Indicator Generator":
+if page == "M&E Indicator Library":
 
     # -----------------------------------------------------------------------
     # STEP 1 — Project Info Form
     # -----------------------------------------------------------------------
 
     if st.session_state.step == 1:
-        st.title("M&E Indicator Generator")
+        st.title("M&E Indicator Library")
         st.markdown(
             "Generate evidence-based monitoring & evaluation indicators for your "
             "development project — aligned with SDGs, USAID, World Bank, and OECD DAC frameworks."
