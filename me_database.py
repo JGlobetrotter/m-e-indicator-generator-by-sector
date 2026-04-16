@@ -4,41 +4,41 @@ _counter = 0
 
 
 def _derive_source_url(framework_source: str) -> str:
-    """Return the canonical URL for the primary organisation behind a framework source."""
+    """Return the canonical framework URL for the primary organisation behind a framework source."""
     fs = framework_source.upper()
     # More-specific orgs checked before generic SDG catch-all
     if "OHCHR" in fs:
-        return "https://ohchr.org"
+        return "https://www.ohchr.org/en/human-rights-indicators"
     if "GRI" in fs:
-        return "https://globalreporting.org"
+        return "https://www.globalreporting.org/standards/"
     if "UNHCR" in fs or "GCR" in fs:
-        return "https://unhcr.org"
+        return "https://www.unhcr.org/what-we-do/how-we-work/delivering-protection/protecting-refugees"
     if "WFP" in fs:
-        return "https://wfp.org"
+        return "https://www.wfp.org/food-security"
     if "ILO" in fs:
-        return "https://ilo.org"
+        return "https://ilostat.ilo.org/"
     if "UNICEF" in fs:
-        return "https://unicef.org"
+        return "https://data.unicef.org/"
     if "IOM" in fs:
-        return "https://iom.int"
+        return "https://www.iom.int/resources/data"
     if "FAO" in fs:
-        return "https://fao.org"
+        return "https://www.fao.org/statistics/"
     if "TCFD" in fs:
-        return "https://tcfdhub.org"
+        return "https://www.fsb-tcfd.org/recommendations/"
     if "SASB" in fs:
-        return "https://sasb.org"
+        return "https://www.sasb.org/standards/"
     if "GCF" in fs:
-        return "https://greenclimate.fund"
+        return "https://www.greenclimate.fund/"
     if "SDG" in fs:
-        return "https://sdgs.un.org"
+        return "https://sdgs.un.org/goals"
     if "USAID" in fs:
-        return "https://usaid.gov"
+        return "https://www.usaid.gov/results-and-data/result-metrics"
     if "WORLD BANK" in fs:
-        return "https://worldbank.org"
+        return "https://data.worldbank.org/indicator"
     if "IPC" in fs:
-        return "https://ipcinfo.org"
+        return "https://www.ipcinfo.org/"
     if "BONN" in fs:
-        return "https://bonnchallenge.org"
+        return "https://www.bonnchallenge.org/"
     return ""
 
 

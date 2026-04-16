@@ -406,7 +406,7 @@ if page == "M&E Indicator Library":
                     ),
                     "Source": st.column_config.LinkColumn(
                         "Source",
-                        display_text=r"https?://([^/]+)",
+                        display_text=r"https?://(?:www\.)?([^/]+)",
                         width="medium",
                         disabled=True,
                     ),
