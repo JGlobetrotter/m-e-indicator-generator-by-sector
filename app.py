@@ -7,7 +7,7 @@ import time
 import pandas as pd
 import streamlit as st
 
-from export_utils import export_to_csv, export_to_excel
+from export_utils import export_to_csv, export_to_excel, export_kpis_to_excel
 from kpi_database import (
     CATEGORY_KPIS,
     SECTOR_SPECIFIC_KPIS,
@@ -86,6 +86,8 @@ def _init_state() -> None:
         "custom_indicators": [],
         # Controls whether the "add custom indicator" form is visible
         "show_custom_form": False,
+        # Dict[kpi_name -> bool] for KPI Library selections
+        "kpi_selections": {},
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -491,7 +493,7 @@ elif page == "KPI Library":
     st.title("KPI Library")
     st.markdown(
         "Browse cross-sector and sector-specific KPIs by category. "
-        "Use the filters below to narrow results."
+        "Check the boxes to select KPIs, then download your selection as Excel."
     )
     st.divider()
 
@@ -523,7 +525,6 @@ elif page == "KPI Library":
         kpis = []
         for cat in selected_categories:
             kpis.extend(CATEGORY_KPIS.get(cat, []))
-        # Add all sector-specific KPIs that match selected categories
         for sector_kpi_list in SECTOR_SPECIFIC_KPIS.values():
             for kpi in sector_kpi_list:
                 if kpi.category in selected_categories:
@@ -531,19 +532,42 @@ elif page == "KPI Library":
     else:
         kpis = get_kpis_for_sector_and_categories(selected_sector, selected_categories)
 
-    # Apply complexity filter
     if complexity_filter == "Basic":
         kpis = [k for k in kpis if k.complexity == "basic"]
     elif complexity_filter == "Advanced":
         kpis = [k for k in kpis if k.complexity == "advanced"]
 
-    st.caption(f"**{len(kpis)}** KPI(s) found")
+    # Ensure every visible KPI has an entry in kpi_selections
+    for kpi in kpis:
+        if kpi.name not in st.session_state.kpi_selections:
+            st.session_state.kpi_selections[kpi.name] = False
+
+    # Select-all / deselect-all row
+    kpi_selected_count = sum(
+        1 for kpi in kpis
+        if st.session_state.kpi_selections.get(kpi.name, False)
+    )
+    sa_col1, sa_col2, sa_col3 = st.columns([3, 1, 1])
+    with sa_col1:
+        st.caption(f"**{len(kpis)}** KPI(s) found · **{kpi_selected_count}** selected")
+    with sa_col2:
+        if st.button("Select all", use_container_width=True, key="kpi_sel_all"):
+            for kpi in kpis:
+                st.session_state.kpi_selections[kpi.name] = True
+            st.rerun()
+    with sa_col3:
+        if st.button("Deselect all", use_container_width=True, key="kpi_desel_all"):
+            for kpi in kpis:
+                st.session_state.kpi_selections[kpi.name] = False
+            st.rerun()
 
     if not kpis:
         st.info("No KPIs match the selected filters.")
     else:
+        kpi_names = [k.name for k in kpis]
         kpi_df = pd.DataFrame([
             {
+                "Select": st.session_state.kpi_selections.get(k.name, False),
                 "KPI": k.name,
                 "Category": k.category,
                 "Description": k.description,
@@ -552,16 +576,55 @@ elif page == "KPI Library":
                 "Data Source": k.data_source,
                 "Complexity": k.complexity.capitalize(),
                 "Data Availability": k.data_availability.capitalize(),
+                "Source": k.source_url,
             }
             for k in kpis
         ])
-        st.dataframe(kpi_df, use_container_width=True, hide_index=True)
 
-        # CSV download of the KPI list
-        csv_out = kpi_df.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label="📄 Download KPI list (CSV)",
-            data=csv_out,
-            file_name="kpi-library.csv",
-            mime="text/csv",
+        edited_kpi_df = st.data_editor(
+            kpi_df,
+            column_config={
+                "Select": st.column_config.CheckboxColumn("✓", width="small"),
+                "KPI": st.column_config.TextColumn("KPI", width="large", disabled=True),
+                "Category": st.column_config.TextColumn("Category", width="medium", disabled=True),
+                "Description": st.column_config.TextColumn("Description", width="large", disabled=True),
+                "Calculation": st.column_config.TextColumn("Calculation", width="large", disabled=True),
+                "Unit": st.column_config.TextColumn("Unit", width="small", disabled=True),
+                "Data Source": st.column_config.TextColumn("Data Source", width="medium", disabled=True),
+                "Complexity": st.column_config.TextColumn("Complexity", width="small", disabled=True),
+                "Data Availability": st.column_config.TextColumn("Data Availability", width="small", disabled=True),
+                "Source": st.column_config.LinkColumn(
+                    "Source",
+                    display_text=r"https?://(?:www\.)?([^/]+)",
+                    width="medium",
+                    disabled=True,
+                ),
+            },
+            hide_index=True,
+            use_container_width=True,
+            key="kpi_editor",
         )
+
+        # Sync checkbox state back to session state
+        for i, row in edited_kpi_df.iterrows():
+            st.session_state.kpi_selections[kpi_names[i]] = bool(row["Select"])
+
+        # Download bar
+        selected_kpis = [
+            kpi for kpi in kpis
+            if st.session_state.kpi_selections.get(kpi.name, False)
+        ]
+        if selected_kpis:
+            st.divider()
+            dl_col1, dl_col2 = st.columns([3, 1.5])
+            with dl_col1:
+                st.markdown(f"**{len(selected_kpis)} KPI(s) selected** — ready to export")
+            with dl_col2:
+                st.download_button(
+                    label="📊 Download Excel",
+                    data=export_kpis_to_excel(selected_kpis),
+                    file_name="kpi-selection.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    type="primary",
+                )

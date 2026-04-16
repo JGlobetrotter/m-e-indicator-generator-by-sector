@@ -141,6 +141,26 @@ SECTOR_SPECIFIC_KPIS: dict[str, list[KPI]] = {
 }
 
 
+# Map each KPI category to its primary sustainability / management standard URL
+_KPI_SOURCE_URLS: dict[str, str] = {
+    "Operational performance":   "https://www.iso.org/iso-9001-quality-management.html",
+    "Financial performance":     "https://www.ifrs.org/issued-standards/",
+    "Sustainability / ESG":      "https://www.globalreporting.org/standards/",
+    "Supply chain performance":  "https://www.globalreporting.org/standards/",
+    "Human rights / labor":      "https://www.globalreporting.org/standards/",
+    "Environmental impact":      "https://www.globalreporting.org/standards/",
+    "Governance and compliance": "https://www.globalreporting.org/standards/",
+    "Risk management":           "https://www.iso.org/iso-31000-risk-management.html",
+    "Customer performance":      "https://www.iso.org/standard/75303.html",
+}
+
+# Populate source_url on every KPI object
+for _kpi_list in [*CATEGORY_KPIS.values(), *SECTOR_SPECIFIC_KPIS.values()]:
+    for _kpi in _kpi_list:
+        if not _kpi.source_url:
+            _kpi.source_url = _KPI_SOURCE_URLS.get(_kpi.category, "")
+
+
 def get_kpis_for_sector_and_categories(sector: str, categories: list[str]) -> list[KPI]:
     results: list[KPI] = []
     for cat in categories:

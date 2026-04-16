@@ -164,3 +164,4 @@ class KPI:
     category: str
     complexity: str   # "basic" | "advanced"
     data_availability: str  # "easy" | "moderate" | "complex"
+    source_url: str = ""
