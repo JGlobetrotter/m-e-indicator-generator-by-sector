@@ -10,7 +10,6 @@ import streamlit as st
 from export_utils import export_to_csv, export_to_excel
 from kpi_database import (
     CATEGORY_KPIS,
-    KPI_CATEGORIES,
     SECTOR_SPECIFIC_KPIS,
     get_kpis_for_sector_and_categories,
 )
@@ -18,6 +17,7 @@ from me_database import ME_INDICATORS, get_indicators_for_sector
 from models import (
     FREQUENCY_OPTIONS,
     INDICATOR_CATEGORIES,
+    KPI_CATEGORIES,
     KPI_SECTORS,
     ME_SECTORS,
     SECTOR_ICONS,
