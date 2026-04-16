@@ -82,7 +82,7 @@ def export_to_excel(indicators: list[SelectedIndicator], project_info: ProjectIn
         ws.column_dimensions[col[0].column_letter].width = min(max_len + 4, 60)
 
     # Freeze the header row
-    ws.freeze_panes = "A2"
+    ws.freeze_panes = f"A{ws.max_row}"
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -102,7 +102,11 @@ _KPI_HEADERS = [
 ]
 
 
-def export_kpis_to_excel(kpis: list[KPI]) -> bytes:
+def export_kpis_to_excel(
+    kpis: list[KPI],
+    org_name: str = "",
+    country: str = "",
+) -> bytes:
     """Return selected KPIs as an Excel (.xlsx) byte string."""
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -112,8 +116,17 @@ def export_kpis_to_excel(kpis: list[KPI]) -> bytes:
     header_font = Font(color="FFFFFF", bold=True)
     header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
+    # Optional overview rows
+    if org_name:
+        ws.append(["Organization", org_name])
+    if country:
+        ws.append(["Country", country])
+    if org_name or country:
+        ws.append([])  # blank spacer row
+
     ws.append(_KPI_HEADERS)
-    for cell in ws[1]:
+    header_row = ws.max_row
+    for cell in ws[header_row]:
         cell.fill = header_fill
         cell.font = header_font
         cell.alignment = header_align

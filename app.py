@@ -497,6 +497,23 @@ elif page == "KPI Library":
     )
     st.divider()
 
+    # --- Overview ---
+    ov_col1, ov_col2 = st.columns(2)
+    with ov_col1:
+        kpi_org_name = st.text_input(
+            "Organization Name *",
+            placeholder="e.g., UNICEF, World Vision, Save the Children",
+            key="kpi_org_name",
+        )
+    with ov_col2:
+        kpi_country = st.selectbox(
+            "Country of Implementation *",
+            [""] + COUNTRIES,
+            format_func=lambda x: "Select a country…" if x == "" else x,
+            key="kpi_country",
+        )
+    st.divider()
+
     kpi_col1, kpi_col2 = st.columns(2)
     with kpi_col1:
         selected_sector = st.selectbox(
@@ -622,7 +639,7 @@ elif page == "KPI Library":
             with dl_col2:
                 st.download_button(
                     label="📊 Download Excel",
-                    data=export_kpis_to_excel(selected_kpis),
+                    data=export_kpis_to_excel(selected_kpis, kpi_org_name, kpi_country),
                     file_name="kpi-selection.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True,
