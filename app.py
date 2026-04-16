@@ -379,6 +379,7 @@ if page == "M&E Indicator Generator":
                 "Category": ind.category,
                 "Unit": ind.unit,
                 "Frequency": sel["frequency"],
+                "Source": ind.source_url,
                 "Framework": ind.framework_source,
                 "Baseline": sel["baseline"],
                 "Target": sel["target"],
@@ -386,7 +387,7 @@ if page == "M&E Indicator Generator":
 
         df = pd.DataFrame(df_rows) if df_rows else pd.DataFrame(
             columns=["Select", "Indicator", "Definition", "Category",
-                     "Unit", "Frequency", "Framework", "Baseline", "Target"]
+                     "Unit", "Frequency", "Source", "Framework", "Baseline", "Target"]
         )
 
         if df_rows:
@@ -402,6 +403,12 @@ if page == "M&E Indicator Generator":
                         "Frequency",
                         options=FREQUENCY_OPTIONS,
                         width="medium",
+                    ),
+                    "Source": st.column_config.LinkColumn(
+                        "Source",
+                        display_text=r"https?://([^/]+)",
+                        width="medium",
+                        disabled=True,
                     ),
                     "Framework": st.column_config.TextColumn("Framework", width="medium", disabled=True),
                     "Baseline": st.column_config.TextColumn("Baseline", width="small"),
@@ -425,25 +432,33 @@ if page == "M&E Indicator Generator":
         else:
             st.info("No indicators match the current filters.")
 
-        # --- Export panel ---
+        # --- Download bar (shown as soon as anything is selected) ---
         selected_indicators = _get_selected_indicators()
+
+        filename_base = (
+            f"{project_info.project_name or 'me-framework'}"
+            .lower()
+            .replace(" ", "-")
+        )
+
         if selected_indicators:
-            st.divider()
-            st.subheader("⬇️ Export Indicator Framework")
-            st.caption(f"{len(selected_indicators)} indicator(s) selected")
-
-            exp_col1, exp_col2 = st.columns(2)
-
-            csv_bytes = export_to_csv(selected_indicators, project_info).encode("utf-8")
             xlsx_bytes = export_to_excel(selected_indicators, project_info)
+            csv_bytes = export_to_csv(selected_indicators, project_info).encode("utf-8")
 
-            filename_base = (
-                f"{project_info.project_name or 'me-framework'}"
-                .lower()
-                .replace(" ", "-")
-            )
-
-            with exp_col1:
+            st.divider()
+            dl_col1, dl_col2, dl_col3 = st.columns([3, 1.5, 1.5])
+            with dl_col1:
+                st.markdown(f"**{len(selected_indicators)} indicator(s) selected** — ready to export")
+            with dl_col2:
+                st.download_button(
+                    label="📊 Download Excel",
+                    data=xlsx_bytes,
+                    file_name=f"{filename_base}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    type="primary",
+                )
+            with dl_col3:
                 st.download_button(
                     label="📄 Download CSV",
                     data=csv_bytes,
@@ -451,16 +466,7 @@ if page == "M&E Indicator Generator":
                     mime="text/csv",
                     use_container_width=True,
                 )
-            with exp_col2:
-                st.download_button(
-                    label="📊 Download Excel (.xlsx)",
-                    data=xlsx_bytes,
-                    file_name=f"{filename_base}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True,
-                )
 
-            # Inline preview
             with st.expander("Preview selected indicators"):
                 preview_rows = [
                     {
@@ -468,6 +474,7 @@ if page == "M&E Indicator Generator":
                         "Category": si.indicator.category,
                         "Unit": si.indicator.unit,
                         "Frequency": si.effective_frequency,
+                        "Source": si.indicator.source_url,
                         "Framework": si.indicator.framework_source,
                         "Baseline": si.baseline,
                         "Target": si.target,

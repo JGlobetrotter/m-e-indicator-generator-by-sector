@@ -128,6 +128,7 @@ class MEIndicator:
     framework_source: str
     sector: str
     category: str
+    source_url: str = ""
 
 
 @dataclass
