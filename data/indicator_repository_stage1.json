@@ -448,5 +448,20 @@
     "publication_year": "2026",
     "last_accessed": "2026-04-22",
     "active_status": "Active"
+  },
+  {
+    "source_id": "SRC031",
+    "organization": "UN Office of the High Commissioner for Human Rights (OHCHR)",
+    "framework_system": "Human Rights Indicators — A Guide to Measurement and Implementation",
+    "sector": "Human Rights",
+    "cross_cutting_domain": "Governance",
+    "source_type": "metadata library",
+    "description": "OHCHR framework providing structural, process and outcome indicators for implementing treaty obligations and monitoring human rights; used to assess state compliance and track progress on civil, political, economic, social and cultural rights.",
+    "canonical_url": "https://www.ohchr.org/en/human-rights-indicators",
+    "direct_file_url": "https://www.ohchr.org/Documents/Publications/Human_rights_indicators_en.pdf",
+    "version": "",
+    "publication_year": "2012",
+    "last_accessed": "2026-04-22",
+    "active_status": "Active"
   }
 ]

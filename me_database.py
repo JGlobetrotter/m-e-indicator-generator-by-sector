@@ -167,6 +167,8 @@ def _derive_source_ids(framework_source: str) -> list[str]:
         ids.append("SRC002")
     if "JMP" in fs:
         ids.append("SRC020")
+    if "OHCHR" in fs:
+        ids.append("SRC031")
     return list(dict.fromkeys(ids))  # deduplicate, preserve order
 
 
