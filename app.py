@@ -25,6 +25,7 @@ from models import (
     ProjectInfo,
     SelectedIndicator,
 )
+from source_library import SourceRecord, filter_sources, load_sources, to_csv as src_to_csv, to_json as src_to_json
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -128,11 +129,36 @@ with st.sidebar:
     st.divider()
     page = st.radio(
         "Navigate",
-        ["M&E Indicator Library", "KPI Library"],
+        ["M&E Indicator Library", "KPI Library", "Source Library"],
         label_visibility="collapsed",
     )
     st.divider()
-    st.caption("Evidence-based indicators aligned with SDGs, USAID, World Bank & OECD DAC frameworks.")
+
+    # Source Library sidebar filters — only shown on that page
+    if page == "Source Library":
+        _all_sources: list[SourceRecord] = load_sources()
+
+        _all_sectors = sorted({r.sector for r in _all_sources})
+        _all_orgs = sorted({r.organization for r in _all_sources})
+        _all_types = sorted({r.source_type for r in _all_sources})
+        _all_domains = sorted({r.cross_cutting_domain for r in _all_sources if r.cross_cutting_domain})
+
+        st.subheader("Filters")
+
+        sl_sector = st.multiselect("Sector", _all_sectors, key="sl_sector")
+        sl_org = st.multiselect("Organization", _all_orgs, key="sl_org")
+        sl_type = st.multiselect("Source Type", _all_types, key="sl_type")
+        sl_domain = st.multiselect("Cross-cutting Domain", _all_domains, key="sl_domain")
+        sl_active_only = st.checkbox("Active only", value=True, key="sl_active")
+
+        if st.button("Reset filters", use_container_width=True):
+            for k in ("sl_sector", "sl_org", "sl_type", "sl_domain"):
+                st.session_state[k] = []
+            st.session_state["sl_active"] = True
+            st.rerun()
+
+    else:
+        st.caption("Evidence-based indicators aligned with SDGs, USAID, World Bank & OECD DAC frameworks.")
 
 # ===========================================================================
 # PAGE 1 — M&E Indicator Library
@@ -645,3 +671,150 @@ elif page == "KPI Library":
                     use_container_width=True,
                     type="primary",
                 )
+
+# ===========================================================================
+# PAGE 3 — Source Library
+# ===========================================================================
+
+elif page == "Source Library":
+    st.title("Source Library")
+    st.markdown(
+        "Browse the Stage 1 repository inventory of major public M&E indicator sources — "
+        "searchable by sector, organization, source type, and cross-cutting domain."
+    )
+
+    # Data quality note
+    with st.expander("ℹ️ Data quality note", expanded=False):
+        st.markdown(
+            """
+**Stage 1 — Repository-level inventory**
+
+This library catalogues *sources* (frameworks, registries, and guides), not individual indicators.
+Each record describes where a set of indicators can be found, along with its sector coverage,
+source type, and access links.
+
+- **Stage 2** (planned): per-indicator extraction from each source, enabling direct search and
+  selection of individual indicators for M&E frameworks.
+- All 22 records in this stage were manually verified as of **April 2026**.
+- `direct_file_url` links to a downloadable PDF/Excel where available; otherwise use `canonical_url`.
+"""
+        )
+
+    # Read filter values set in the sidebar
+    all_sources: list[SourceRecord] = load_sources()
+
+    sl_sector: list[str] = st.session_state.get("sl_sector", [])
+    sl_org: list[str] = st.session_state.get("sl_org", [])
+    sl_type: list[str] = st.session_state.get("sl_type", [])
+    sl_domain: list[str] = st.session_state.get("sl_domain", [])
+    sl_active_only: bool = st.session_state.get("sl_active", True)
+
+    # Keyword search + sort
+    src_search_col, src_sort_col = st.columns([3, 1.5])
+    with src_search_col:
+        src_keyword = st.text_input(
+            "Search sources",
+            placeholder="Search by name, organization, sector or description…",
+            label_visibility="collapsed",
+        )
+    with src_sort_col:
+        src_sort = st.selectbox(
+            "Sort by",
+            ["Organization (A–Z)", "Framework (A–Z)", "Publication year (newest)", "Source ID"],
+            label_visibility="collapsed",
+        )
+
+    # Apply filters
+    filtered_sources = filter_sources(
+        all_sources,
+        sectors=sl_sector or None,
+        organizations=sl_org or None,
+        source_types=sl_type or None,
+        cross_cutting_domains=sl_domain or None,
+        active_only=sl_active_only,
+        keyword=src_keyword,
+    )
+
+    # Apply sort
+    if src_sort == "Organization (A–Z)":
+        filtered_sources.sort(key=lambda r: r.organization.lower())
+    elif src_sort == "Framework (A–Z)":
+        filtered_sources.sort(key=lambda r: r.framework_system.lower())
+    elif src_sort == "Publication year (newest)":
+        filtered_sources.sort(key=lambda r: r.publication_year or "0", reverse=True)
+    else:
+        filtered_sources.sort(key=lambda r: r.source_id)
+
+    # Result count + export buttons
+    count_col, csv_col, json_col = st.columns([3, 1, 1])
+    with count_col:
+        st.markdown(
+            f"**{len(filtered_sources)}** of **{len(all_sources)}** source(s) shown"
+        )
+    with csv_col:
+        st.download_button(
+            label="⬇️ CSV",
+            data=src_to_csv(filtered_sources).encode("utf-8"),
+            file_name="source_library.csv",
+            mime="text/csv",
+            use_container_width=True,
+            disabled=len(filtered_sources) == 0,
+        )
+    with json_col:
+        st.download_button(
+            label="⬇️ JSON",
+            data=src_to_json(filtered_sources).encode("utf-8"),
+            file_name="source_library.json",
+            mime="application/json",
+            use_container_width=True,
+            disabled=len(filtered_sources) == 0,
+        )
+
+    st.divider()
+
+    if not filtered_sources:
+        st.info("No sources match the current filters. Try adjusting the sidebar filters or clearing the search.")
+    else:
+        # Source detail cards
+        _SOURCE_TYPE_COLORS: dict[str, str] = {
+            "indicator registry":               "background:#dbeafe;color:#1e40af",
+            "metadata library":                 "background:#fef3c7;color:#92400e",
+            "donor framework":                  "background:#d1fae5;color:#065f46",
+            "survey indicator guide":           "background:#ede9fe;color:#5b21b6",
+            "survey instrument/question repository": "background:#fce7f3;color:#9d174d",
+            "humanitarian cluster registry":    "background:#ffedd5;color:#c2410c",
+            "indicator registry/metadata library": "background:#e0f2fe;color:#0369a1",
+        }
+
+        def _badge(label: str, css: str) -> str:
+            return f'<span style="{css};border-radius:4px;padding:2px 8px;font-size:12px;">{label}</span>'
+
+        for rec in filtered_sources:
+            type_css = _SOURCE_TYPE_COLORS.get(rec.source_type, "background:#f3f4f6;color:#374151")
+            header_badges = _badge(rec.source_type, type_css)
+            if rec.active_status == "Active":
+                header_badges += " " + _badge("Active", "background:#d1fae5;color:#065f46")
+
+            with st.expander(f"**{rec.framework_system}** — {rec.organization}", expanded=False):
+                st.markdown(header_badges, unsafe_allow_html=True)
+                st.markdown(f"**{rec.description}**")
+                st.divider()
+
+                meta_col1, meta_col2 = st.columns(2)
+                with meta_col1:
+                    st.markdown(f"**Source ID:** {rec.source_id}")
+                    st.markdown(f"**Organization:** {rec.organization}")
+                    st.markdown(f"**Sector:** {rec.sector}")
+                    if rec.cross_cutting_domain:
+                        st.markdown(f"**Cross-cutting domain:** {rec.cross_cutting_domain}")
+                with meta_col2:
+                    if rec.version:
+                        st.markdown(f"**Version:** {rec.version}")
+                    if rec.publication_year:
+                        st.markdown(f"**Publication year:** {rec.publication_year}")
+                    st.markdown(f"**Last accessed:** {rec.last_accessed}")
+                    st.markdown(f"**Status:** {rec.active_status}")
+
+                st.markdown(f"**Homepage / Canonical URL:** [{rec.canonical_url}]({rec.canonical_url})")
+                if rec.direct_file_url and rec.direct_file_url != rec.canonical_url:
+                    st.markdown(f"**Direct file download:** [{rec.direct_file_url}]({rec.direct_file_url})")
