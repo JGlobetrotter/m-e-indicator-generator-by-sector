@@ -85,6 +85,10 @@ def filter_sources(
     return out
 
 
+def get_indicators_for_source(source_id: str, all_indicators: list) -> list:
+    return [ind for ind in all_indicators if source_id in (ind.source_ids or [])]
+
+
 def to_csv(records: list[SourceRecord]) -> str:
     buf = io.StringIO()
     writer = csv.writer(buf, quoting=csv.QUOTE_ALL)
