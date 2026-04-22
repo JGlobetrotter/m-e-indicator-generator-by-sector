@@ -139,15 +139,11 @@ with st.sidebar:
         _all_sources: list[SourceRecord] = load_sources()
 
         _all_sectors = sorted({r.sector for r in _all_sources})
-        _all_orgs = sorted({r.organization for r in _all_sources})
-        _all_types = sorted({r.source_type for r in _all_sources})
         _all_domains = sorted({r.cross_cutting_domain for r in _all_sources if r.cross_cutting_domain})
 
         st.subheader("Filters")
 
         sl_sector = st.multiselect("Sector", _all_sectors, key="sl_sector")
-        sl_org = st.multiselect("Organization", _all_orgs, key="sl_org")
-        sl_type = st.multiselect("Source Type", _all_types, key="sl_type")
         sl_domain = st.multiselect("Cross-cutting Domain", _all_domains, key="sl_domain")
         sl_active_only = st.checkbox("Active only", value=True, key="sl_active")
 
@@ -700,16 +696,17 @@ source type, and access links.
 """
         )
 
-    # Read filter values set in the sidebar
+    # Load data + read sidebar filter values
     all_sources: list[SourceRecord] = load_sources()
 
+    _all_orgs = sorted({r.organization for r in all_sources})
+    _all_types = sorted({r.source_type for r in all_sources})
+
     sl_sector: list[str] = st.session_state.get("sl_sector", [])
-    sl_org: list[str] = st.session_state.get("sl_org", [])
-    sl_type: list[str] = st.session_state.get("sl_type", [])
     sl_domain: list[str] = st.session_state.get("sl_domain", [])
     sl_active_only: bool = st.session_state.get("sl_active", True)
 
-    # Keyword search + sort
+    # Row 1: keyword search + sort
     src_search_col, src_sort_col = st.columns([3, 1.5])
     with src_search_col:
         src_keyword = st.text_input(
@@ -723,6 +720,13 @@ source type, and access links.
             ["Organization (A–Z)", "Framework (A–Z)", "Publication year (newest)", "Source ID"],
             label_visibility="collapsed",
         )
+
+    # Row 2: Organization + Source Type inline filters
+    org_col, type_col = st.columns(2)
+    with org_col:
+        sl_org = st.multiselect("Organization", _all_orgs, key="sl_org")
+    with type_col:
+        sl_type = st.multiselect("Source Type", _all_types, key="sl_type")
 
     # Apply filters
     filtered_sources = filter_sources(
