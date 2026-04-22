@@ -144,10 +144,38 @@ ME_INDICATORS: list[MEIndicator] = [
 ]
 
 
-# Populate source_url from framework_source for every indicator
+def _derive_source_ids(framework_source: str) -> list[str]:
+    fs = framework_source.upper()
+    ids: list[str] = []
+    if "SDG" in fs:
+        ids.append("SRC022")
+    if "USAID HL" in fs:
+        ids.append("SRC003")
+    if "WFP" in fs or "IPC" in fs:
+        ids.append("SRC008")
+    if "FAO" in fs:
+        ids.append("SRC019")
+    if "GCR" in fs:
+        ids += ["SRC001", "SRC011"]
+    if "UNHCR" in fs:
+        ids += ["SRC001", "SRC011"]
+    if "IOM" in fs:
+        ids.append("SRC013")
+    if "UNICEF" in fs:
+        ids.append("SRC004")
+    if "WHO" in fs:
+        ids.append("SRC002")
+    if "JMP" in fs:
+        ids.append("SRC020")
+    return list(dict.fromkeys(ids))  # deduplicate, preserve order
+
+
+# Populate source_url and source_ids from framework_source for every indicator
 for _ind in ME_INDICATORS:
     if not _ind.source_url:
         _ind.source_url = _derive_source_url(_ind.framework_source)
+    if not _ind.source_ids:
+        _ind.source_ids = _derive_source_ids(_ind.framework_source)
 
 
 def get_indicators_for_sector(sector: str) -> list[MEIndicator]:

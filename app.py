@@ -25,7 +25,12 @@ from models import (
     ProjectInfo,
     SelectedIndicator,
 )
-from source_library import SourceRecord, filter_sources, load_sources, to_csv as src_to_csv, to_json as src_to_json
+from source_library import (
+    SourceRecord,
+    filter_sources,
+    get_indicators_for_source,
+    load_sources,
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -79,8 +84,6 @@ st.set_page_config(
 
 def _init_state() -> None:
     defaults = {
-        "step": 1,
-        "project_info": None,
         # Dict[indicator_id -> {selected, baseline, target, frequency}]
         "selections": {},
         # List of custom MEIndicator objects added by the user
@@ -102,10 +105,7 @@ _init_state()
 # ---------------------------------------------------------------------------
 
 def _get_selected_indicators() -> list[SelectedIndicator]:
-    project_info: ProjectInfo = st.session_state.project_info
-    db_indicators = get_indicators_for_sector(project_info.sector)
-    all_indicators = db_indicators + st.session_state.custom_indicators
-
+    all_indicators = ME_INDICATORS + st.session_state.custom_indicators
     result: list[SelectedIndicator] = []
     for ind in all_indicators:
         sel = st.session_state.selections.get(ind.id, {})
@@ -129,383 +129,300 @@ with st.sidebar:
     st.divider()
     page = st.radio(
         "Navigate",
-        ["M&E Indicator Library", "KPI Library", "Source Library"],
+        ["M&E Indicator Library", "KPI Library"],
         label_visibility="collapsed",
     )
     st.divider()
 
-    # Source Library sidebar filters — only shown on that page
-    if page == "Source Library":
-        _all_sources: list[SourceRecord] = load_sources()
-
-        _all_sectors = sorted({r.sector for r in _all_sources})
-        _all_domains = sorted({r.cross_cutting_domain for r in _all_sources if r.cross_cutting_domain})
-
-        st.subheader("Filters")
-
-        sl_sector = st.multiselect("Sector", _all_sectors, key="sl_sector")
-        sl_domain = st.multiselect("Cross-cutting Domain", _all_domains, key="sl_domain")
-        sl_active_only = st.checkbox("Active only", value=True, key="sl_active")
-
-        if st.button("Reset filters", use_container_width=True):
-            for k in ("sl_sector", "sl_org", "sl_type", "sl_domain"):
-                st.session_state[k] = []
-            st.session_state["sl_active"] = True
-            st.rerun()
-
+    if page == "M&E Indicator Library":
+        st.subheader("Project Info")
+        st.caption("Optional — used for export metadata only.")
+        st.text_input("Organization", key="sb_org", placeholder="e.g., UNICEF")
+        st.text_input("Project Name", key="sb_project", placeholder="e.g., Health Access Program")
+        st.selectbox(
+            "Country",
+            [""] + COUNTRIES,
+            key="sb_country",
+            format_func=lambda x: "Select a country…" if x == "" else x,
+        )
     else:
         st.caption("Evidence-based indicators aligned with SDGs, USAID, World Bank & OECD DAC frameworks.")
 
 # ===========================================================================
-# PAGE 1 — M&E Indicator Library
+# PAGE 1 — M&E Indicator Library (unified source + indicator browse)
 # ===========================================================================
+
+_IND_EDITOR_COLS = {
+    "Select":    st.column_config.CheckboxColumn("✓", width="small"),
+    "Indicator": st.column_config.TextColumn("Indicator", width="large", disabled=True),
+    "Category":  st.column_config.TextColumn("Category", width="small", disabled=True),
+    "Unit":      st.column_config.TextColumn("Unit", width="small", disabled=True),
+    "Frequency": st.column_config.SelectboxColumn("Frequency", options=FREQUENCY_OPTIONS, width="medium"),
+    "Baseline":  st.column_config.TextColumn("Baseline", width="small"),
+    "Target":    st.column_config.TextColumn("Target", width="small"),
+}
+
+_SOURCE_TYPE_COLORS: dict[str, str] = {
+    "indicator registry":                    "background:#dbeafe;color:#1e40af",
+    "metadata library":                      "background:#fef3c7;color:#92400e",
+    "donor framework":                       "background:#d1fae5;color:#065f46",
+    "survey indicator guide":                "background:#ede9fe;color:#5b21b6",
+    "survey instrument/question repository": "background:#fce7f3;color:#9d174d",
+    "humanitarian cluster registry":         "background:#ffedd5;color:#c2410c",
+    "indicator registry/metadata library":   "background:#e0f2fe;color:#0369a1",
+}
+
+
+def _badge(label: str, css: str) -> str:
+    return (
+        f'<span style="{css};border-radius:4px;padding:2px 8px;'
+        f'font-size:12px;margin-right:4px;">{label}</span>'
+    )
+
+
+def _render_indicator_table(
+    indicators: list[MEIndicator],
+    editor_key: str,
+) -> None:
+    """Render a mini indicator table inside a source card and sync selections."""
+    if not indicators:
+        return
+
+    ind_ids = [ind.id for ind in indicators]
+    # Ensure all have session state entries
+    for ind in indicators:
+        if ind.id not in st.session_state.selections:
+            st.session_state.selections[ind.id] = {
+                "selected": False, "baseline": "", "target": "", "frequency": ind.frequency,
+            }
+
+    sa_col, sd_col, _ = st.columns([1, 1, 4])
+    with sa_col:
+        if st.button("Select all", key=f"sa_{editor_key}", use_container_width=True):
+            for ind in indicators:
+                st.session_state.selections[ind.id]["selected"] = True
+            st.rerun()
+    with sd_col:
+        if st.button("Deselect", key=f"sd_{editor_key}", use_container_width=True):
+            for ind in indicators:
+                st.session_state.selections[ind.id]["selected"] = False
+            st.rerun()
+
+    df_rows = []
+    for ind in indicators:
+        sel = st.session_state.selections[ind.id]
+        prefix = "⭐ " if ind.id.startswith("custom-") else ""
+        df_rows.append({
+            "Select":    sel["selected"],
+            "Indicator": prefix + ind.title,
+            "Category":  ind.category,
+            "Unit":      ind.unit,
+            "Frequency": sel["frequency"],
+            "Baseline":  sel["baseline"],
+            "Target":    sel["target"],
+        })
+
+    edited = st.data_editor(
+        pd.DataFrame(df_rows),
+        column_config=_IND_EDITOR_COLS,
+        hide_index=True,
+        use_container_width=True,
+        key=editor_key,
+    )
+
+    for i, row in edited.iterrows():
+        st.session_state.selections[ind_ids[i]] = {
+            "selected":  bool(row["Select"]),
+            "baseline":  str(row["Baseline"]) if row["Baseline"] else "",
+            "target":    str(row["Target"]) if row["Target"] else "",
+            "frequency": str(row["Frequency"]),
+        }
+
 
 if page == "M&E Indicator Library":
 
-    # -----------------------------------------------------------------------
-    # STEP 1 — Project Info Form
-    # -----------------------------------------------------------------------
+    st.title("M&E Indicator Library")
+    st.markdown(
+        "Browse indicator sources below, select indicators, then export your M&E framework. "
+        "Add project details in the sidebar for export metadata."
+    )
 
-    if st.session_state.step == 1:
-        st.title("M&E Indicator Library")
-        st.markdown(
-            "Generate evidence-based monitoring & evaluation indicators for your "
-            "development project — aligned with SDGs, USAID, World Bank, and OECD DAC frameworks."
+    all_sources = load_sources()
+    all_me_indicators = ME_INDICATORS + st.session_state.custom_indicators
+
+    # Ensure every indicator has a session state entry up-front
+    for _ind in all_me_indicators:
+        if _ind.id not in st.session_state.selections:
+            st.session_state.selections[_ind.id] = {
+                "selected": False, "baseline": "", "target": "", "frequency": _ind.frequency,
+            }
+
+    # ── Filter bar ──────────────────────────────────────────────────────────
+    _all_src_types = sorted({r.source_type for r in all_sources})
+    fc1, fc2, fc3 = st.columns([3, 1.5, 1.5])
+    with fc1:
+        me_search = st.text_input(
+            "Search",
+            placeholder="Search sources by name, organization or description…",
+            label_visibility="collapsed",
         )
-        st.divider()
+    with fc2:
+        me_type_filter = st.multiselect(
+            "Source type", _all_src_types,
+            placeholder="Source type…", label_visibility="collapsed",
+        )
+    with fc3:
+        me_sector_filter = st.multiselect(
+            "Sector", ME_SECTORS,
+            placeholder="Sector…", label_visibility="collapsed",
+        )
 
-        with st.form("project_info_form"):
-            st.subheader("Project Details")
-            col_a, col_b = st.columns(2)
-            with col_a:
-                org_name = st.text_input(
-                    "Organization Name *",
-                    placeholder="e.g., UNICEF, World Vision, Save the Children",
-                )
-            with col_b:
-                project_name = st.text_input(
-                    "Project Name *",
-                    placeholder="e.g., Rural Water Access Improvement Program",
-                )
-
-            col_c, col_d = st.columns(2)
-            with col_c:
-                country = st.selectbox(
-                    "Country of Implementation *",
-                    [""] + COUNTRIES,
-                    format_func=lambda x: "Select a country…" if x == "" else x,
-                )
-            with col_d:
-                sector_options = [""] + ME_SECTORS
-                sector_display = {
-                    s: (f"{SECTOR_ICONS[s]}  {s}" if s else "Select a sector…")
-                    for s in sector_options
-                }
-                sector = st.selectbox(
-                    "Sector *",
-                    sector_options,
-                    format_func=lambda x: sector_display[x],
-                )
-
-            st.subheader("Additional Details")
-            col_e, col_f, col_g = st.columns(3)
-            with col_e:
-                sub_sector = st.text_input(
-                    "Sub-sector / Thematic Focus",
-                    placeholder="e.g., Maternal Health",
-                )
-            with col_f:
-                duration = st.text_input(
-                    "Project Duration",
-                    placeholder="e.g., 3 years (2024–2027)",
-                )
-            with col_g:
-                target_pop = st.text_input(
-                    "Target Population",
-                    placeholder="e.g., 50,000 rural households",
-                )
-
-            submitted = st.form_submit_button(
-                "Generate Indicators →",
-                use_container_width=True,
-                type="primary",
-            )
-
-        if submitted:
-            errors: list[str] = []
-            if not org_name.strip():
-                errors.append("Organization name is required.")
-            if not project_name.strip():
-                errors.append("Project name is required.")
-            if not country:
-                errors.append("Country of implementation is required.")
-            if not sector:
-                errors.append("Sector is required.")
-
-            if errors:
-                for msg in errors:
-                    st.error(msg)
-            else:
-                st.session_state.project_info = ProjectInfo(
-                    organization_name=org_name.strip(),
-                    project_name=project_name.strip(),
-                    country=country,
-                    sector=sector,
-                    sub_sector=sub_sector.strip(),
-                    project_duration=duration.strip(),
-                    target_population=target_pop.strip(),
-                )
-                # Reset selections whenever a new project is started
-                st.session_state.selections = {}
-                st.session_state.custom_indicators = []
-                st.session_state.show_custom_form = False
-                st.session_state.step = 2
-                st.rerun()
-
-    # -----------------------------------------------------------------------
-    # STEP 2 — Indicator Results
-    # -----------------------------------------------------------------------
-
-    elif st.session_state.step == 2:
-        project_info: ProjectInfo = st.session_state.project_info
-        icon = SECTOR_ICONS.get(project_info.sector, "")
-
-        # Back button
-        if st.button("← Back to project info"):
-            st.session_state.step = 1
-            st.rerun()
-
-        # Header
-        st.title(f"{icon} {project_info.sector} Indicators")
-        st.caption(f"**{project_info.project_name}** — {project_info.organization_name} · {project_info.country}")
-        st.divider()
-
-        # Gather all indicators for this sector
-        db_indicators = get_indicators_for_sector(project_info.sector)
-        all_indicators = db_indicators + st.session_state.custom_indicators
-
-        # Ensure every indicator has an entry in selections
-        for ind in all_indicators:
-            if ind.id not in st.session_state.selections:
-                st.session_state.selections[ind.id] = {
-                    "selected": False,
-                    "baseline": "",
-                    "target": "",
-                    "frequency": ind.frequency,
-                }
-
-        # --- Filters ---
-        filter_col1, filter_col2, filter_col3 = st.columns([3, 1.5, 1.2])
-        with filter_col1:
-            search = st.text_input(
-                "Search indicators",
-                placeholder="Search by title or definition…",
-                label_visibility="collapsed",
-            )
-        with filter_col2:
-            cat_filter = st.selectbox(
-                "Category",
-                ["All categories"] + INDICATOR_CATEGORIES,
-                label_visibility="collapsed",
-            )
-        with filter_col3:
-            if st.button("➕ Add custom indicator", use_container_width=True):
-                st.session_state.show_custom_form = not st.session_state.show_custom_form
-                st.rerun()
-
-        # --- Custom indicator form ---
-        if st.session_state.show_custom_form:
-            with st.expander("New Custom Indicator", expanded=True):
-                with st.form("custom_indicator_form", clear_on_submit=True):
-                    ci_col1, ci_col2 = st.columns(2)
-                    with ci_col1:
-                        ci_title = st.text_input("Indicator Title *", placeholder="e.g., Number of beneficiaries trained")
-                        ci_method = st.text_input("Measurement Method", placeholder="e.g., Project records")
-                    with ci_col2:
-                        ci_unit = st.text_input("Unit", placeholder="e.g., Number, %")
-                        ci_source = st.text_input("Data Source", placeholder="e.g., Project database")
-                    ci_definition = st.text_area("Definition", placeholder="Describe what this indicator measures", height=80)
-                    ci_submit = st.form_submit_button("Add Indicator", type="primary")
-
-                if ci_submit:
-                    if not ci_title.strip():
-                        st.error("Indicator title is required.")
-                    else:
-                        new_id = f"custom-{int(time.time() * 1000)}"
-                        new_ind = MEIndicator(
-                            id=new_id,
-                            title=ci_title.strip(),
-                            definition=ci_definition.strip() or "Custom indicator",
-                            measurement_method=ci_method.strip() or "To be defined",
-                            unit=ci_unit.strip() or "Number",
-                            frequency="quarterly",
-                            suggested_data_source=ci_source.strip() or "Project records",
-                            framework_source="Custom",
-                            sector=project_info.sector,
-                            category="Output",
-                        )
-                        st.session_state.custom_indicators.append(new_ind)
-                        st.session_state.selections[new_id] = {
-                            "selected": True,
-                            "baseline": "",
-                            "target": "",
-                            "frequency": "quarterly",
-                        }
-                        st.session_state.show_custom_form = False
-                        st.success(f"Custom indicator '{new_ind.title}' added.")
-                        st.rerun()
-
-        # --- Apply filters ---
-        filtered_indicators = [
-            ind for ind in all_indicators
-            if (cat_filter == "All categories" or ind.category == cat_filter)
-            and (
-                not search
-                or search.lower() in ind.title.lower()
-                or search.lower() in ind.definition.lower()
-            )
+    # Apply source filters
+    filtered_sources = filter_sources(
+        all_sources,
+        source_types=me_type_filter or None,
+        active_only=False,
+        keyword=me_search,
+    )
+    if me_sector_filter:
+        filtered_sources = [
+            r for r in filtered_sources
+            if any(s.lower() in r.sector.lower() for s in me_sector_filter)
         ]
 
-        # --- Select all / deselect all ---
-        sel_col1, sel_col2, sel_col3 = st.columns([2, 1, 1])
-        with sel_col1:
-            selected_count = sum(
-                1 for ind in all_indicators
-                if st.session_state.selections.get(ind.id, {}).get("selected", False)
-            )
-            st.markdown(f"**{len(filtered_indicators)}** indicators shown · **{selected_count}** selected")
-        with sel_col2:
-            if st.button("Select all visible", use_container_width=True):
-                for ind in filtered_indicators:
-                    st.session_state.selections[ind.id]["selected"] = True
-                st.rerun()
-        with sel_col3:
-            if st.button("Deselect all", use_container_width=True):
-                for ind in all_indicators:
-                    st.session_state.selections[ind.id]["selected"] = False
-                st.rerun()
+    # Sort: sources with most linked indicators first, then alpha
+    filtered_sources.sort(
+        key=lambda r: (-len(get_indicators_for_source(r.source_id, all_me_indicators)),
+                       r.framework_system.lower())
+    )
 
-        st.divider()
+    # ── Global status + export bar ──────────────────────────────────────────
+    _selected_now = _get_selected_indicators()
+    _project_info = ProjectInfo(
+        organization_name=st.session_state.get("sb_org", ""),
+        project_name=st.session_state.get("sb_project", ""),
+        country=st.session_state.get("sb_country", ""),
+    )
+    _fname = (
+        (st.session_state.get("sb_project") or "me-framework")
+        .lower().replace(" ", "-")
+    )
 
-        # --- Indicator table via st.data_editor ---
-        # Build the dataframe from the current session state so selections
-        # persist across filter / search changes.
-        indicator_ids = [ind.id for ind in filtered_indicators]
-
-        df_rows = []
-        for ind in filtered_indicators:
-            sel = st.session_state.selections[ind.id]
-            is_custom = ind.id.startswith("custom-")
-            df_rows.append({
-                "Select": sel["selected"],
-                "Indicator": ("⭐ " if is_custom else "") + ind.title,
-                "Definition": ind.definition,
-                "Category": ind.category,
-                "Unit": ind.unit,
-                "Frequency": sel["frequency"],
-                "Source": ind.source_url,
-                "Framework": ind.framework_source,
-                "Baseline": sel["baseline"],
-                "Target": sel["target"],
-            })
-
-        df = pd.DataFrame(df_rows) if df_rows else pd.DataFrame(
-            columns=["Select", "Indicator", "Definition", "Category",
-                     "Unit", "Frequency", "Source", "Framework", "Baseline", "Target"]
+    sc1, sc2, sc3 = st.columns([3, 1.2, 1.2])
+    with sc1:
+        st.markdown(
+            f"**{len(filtered_sources)}** of **{len(all_sources)}** sources shown · "
+            f"**{len(_selected_now)}** indicator(s) selected"
+        )
+    with sc2:
+        st.download_button(
+            "📊 Download Excel",
+            data=export_to_excel(_selected_now, _project_info) if _selected_now else b"",
+            file_name=f"{_fname}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+            type="primary",
+            disabled=not _selected_now,
+        )
+    with sc3:
+        st.download_button(
+            "📄 Download CSV",
+            data=export_to_csv(_selected_now, _project_info).encode("utf-8") if _selected_now else b"",
+            file_name=f"{_fname}.csv",
+            mime="text/csv",
+            use_container_width=True,
+            disabled=not _selected_now,
         )
 
-        if df_rows:
-            edited_df = st.data_editor(
-                df,
-                column_config={
-                    "Select": st.column_config.CheckboxColumn("✓", width="small"),
-                    "Indicator": st.column_config.TextColumn("Indicator", width="large", disabled=True),
-                    "Definition": st.column_config.TextColumn("Definition", width="large", disabled=True),
-                    "Category": st.column_config.TextColumn("Category", width="small", disabled=True),
-                    "Unit": st.column_config.TextColumn("Unit", width="small", disabled=True),
-                    "Frequency": st.column_config.SelectboxColumn(
-                        "Frequency",
-                        options=FREQUENCY_OPTIONS,
-                        width="medium",
-                    ),
-                    "Source": st.column_config.LinkColumn(
-                        "Source",
-                        display_text=r"https?://(?:www\.)?([^/]+)",
-                        width="medium",
-                        disabled=True,
-                    ),
-                    "Framework": st.column_config.TextColumn("Framework", width="medium", disabled=True),
-                    "Baseline": st.column_config.TextColumn("Baseline", width="small"),
-                    "Target": st.column_config.TextColumn("Target", width="small"),
-                },
-                hide_index=True,
-                use_container_width=True,
-                key="indicator_editor",
+    st.divider()
+
+    # ── Source cards ─────────────────────────────────────────────────────────
+    for rec in filtered_sources:
+        src_indicators = get_indicators_for_source(rec.source_id, all_me_indicators)
+        ind_count = len(src_indicators)
+        count_label = f"{ind_count} indicator{'s' if ind_count != 1 else ''} in library"
+
+        type_css = _SOURCE_TYPE_COLORS.get(rec.source_type, "background:#f3f4f6;color:#374151")
+        card_title = f"**{rec.framework_system}** — {rec.organization}   ·   *{count_label}*"
+
+        with st.expander(card_title, expanded=False):
+            badges = _badge(rec.source_type, type_css)
+            if rec.active_status == "Active":
+                badges += _badge("Active", "background:#d1fae5;color:#065f46")
+            if rec.sector:
+                badges += _badge(rec.sector[:40], "background:#f3f4f6;color:#374151")
+            st.markdown(badges, unsafe_allow_html=True)
+            st.markdown(rec.description)
+
+            link_parts = [f"[{rec.canonical_url}]({rec.canonical_url})"]
+            if rec.direct_file_url and rec.direct_file_url != rec.canonical_url:
+                link_parts.append(f"[Direct download]({rec.direct_file_url})")
+            st.markdown("  ·  ".join(link_parts))
+
+            if ind_count > 0:
+                st.divider()
+                st.caption(f"Select indicators from this source:")
+                _render_indicator_table(src_indicators, editor_key=f"ed_{rec.source_id}")
+
+    # ── Other Frameworks card (unlinked indicators) ──────────────────────────
+    unlinked_indicators = [ind for ind in all_me_indicators if not ind.source_ids]
+    if unlinked_indicators:
+        other_count = len(unlinked_indicators)
+        with st.expander(
+            f"**Other Frameworks** (GRI, SASB, TCFD, OHCHR, World Bank…)   ·   "
+            f"*{other_count} indicator{'s' if other_count != 1 else ''} in library*",
+            expanded=False,
+        ):
+            st.markdown(
+                "Indicators linked to frameworks not yet in the source library "
+                "(ESG standards, OHCHR, USAID sector-specific codes, World Bank)."
             )
-
-            # Sync edits back to session state (runs on every rerun so state
-            # is always up-to-date before any other widget interaction)
-            for i, row in edited_df.iterrows():
-                ind_id = indicator_ids[i]
-                st.session_state.selections[ind_id] = {
-                    "selected": bool(row["Select"]),
-                    "baseline": str(row["Baseline"]) if row["Baseline"] else "",
-                    "target": str(row["Target"]) if row["Target"] else "",
-                    "frequency": str(row["Frequency"]),
-                }
-        else:
-            st.info("No indicators match the current filters.")
-
-        # --- Download bar (shown as soon as anything is selected) ---
-        selected_indicators = _get_selected_indicators()
-
-        filename_base = (
-            f"{project_info.project_name or 'me-framework'}"
-            .lower()
-            .replace(" ", "-")
-        )
-
-        if selected_indicators:
-            xlsx_bytes = export_to_excel(selected_indicators, project_info)
-            csv_bytes = export_to_csv(selected_indicators, project_info).encode("utf-8")
-
             st.divider()
-            dl_col1, dl_col2, dl_col3 = st.columns([3, 1.5, 1.5])
-            with dl_col1:
-                st.markdown(f"**{len(selected_indicators)} indicator(s) selected** — ready to export")
-            with dl_col2:
-                st.download_button(
-                    label="📊 Download Excel",
-                    data=xlsx_bytes,
-                    file_name=f"{filename_base}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True,
-                    type="primary",
-                )
-            with dl_col3:
-                st.download_button(
-                    label="📄 Download CSV",
-                    data=csv_bytes,
-                    file_name=f"{filename_base}.csv",
-                    mime="text/csv",
-                    use_container_width=True,
-                )
+            _render_indicator_table(unlinked_indicators, editor_key="ed_other")
 
-            with st.expander("Preview selected indicators"):
-                preview_rows = [
-                    {
-                        "Indicator": si.indicator.title,
-                        "Category": si.indicator.category,
-                        "Unit": si.indicator.unit,
-                        "Frequency": si.effective_frequency,
-                        "Source": si.indicator.source_url,
-                        "Framework": si.indicator.framework_source,
-                        "Baseline": si.baseline,
-                        "Target": si.target,
+    # ── Custom indicator form ────────────────────────────────────────────────
+    st.divider()
+    if st.button("➕ Add custom indicator"):
+        st.session_state.show_custom_form = not st.session_state.show_custom_form
+        st.rerun()
+
+    if st.session_state.show_custom_form:
+        with st.expander("New Custom Indicator", expanded=True):
+            with st.form("custom_indicator_form", clear_on_submit=True):
+                ci_col1, ci_col2 = st.columns(2)
+                with ci_col1:
+                    ci_title = st.text_input("Indicator Title *", placeholder="e.g., Number of beneficiaries trained")
+                    ci_method = st.text_input("Measurement Method", placeholder="e.g., Project records")
+                with ci_col2:
+                    ci_unit = st.text_input("Unit", placeholder="e.g., Number, %")
+                    ci_source_input = st.text_input("Data Source", placeholder="e.g., Project database")
+                ci_definition = st.text_area("Definition", placeholder="Describe what this indicator measures", height=80)
+                ci_submit = st.form_submit_button("Add Indicator", type="primary")
+
+            if ci_submit:
+                if not ci_title.strip():
+                    st.error("Indicator title is required.")
+                else:
+                    new_id = f"custom-{int(time.time() * 1000)}"
+                    new_ind = MEIndicator(
+                        id=new_id,
+                        title=ci_title.strip(),
+                        definition=ci_definition.strip() or "Custom indicator",
+                        measurement_method=ci_method.strip() or "To be defined",
+                        unit=ci_unit.strip() or "Number",
+                        frequency="quarterly",
+                        suggested_data_source=ci_source_input.strip() or "Project records",
+                        framework_source="Custom",
+                        sector="Custom",
+                        category="Output",
+                    )
+                    st.session_state.custom_indicators.append(new_ind)
+                    st.session_state.selections[new_id] = {
+                        "selected": True, "baseline": "", "target": "", "frequency": "quarterly",
                     }
-                    for si in selected_indicators
-                ]
-                st.dataframe(pd.DataFrame(preview_rows), use_container_width=True, hide_index=True)
+                    st.session_state.show_custom_form = False
+                    st.success(f"Custom indicator '{new_ind.title}' added.")
+                    st.rerun()
 
 # ===========================================================================
 # PAGE 2 — KPI Library
@@ -668,157 +585,3 @@ elif page == "KPI Library":
                     type="primary",
                 )
 
-# ===========================================================================
-# PAGE 3 — Source Library
-# ===========================================================================
-
-elif page == "Source Library":
-    st.title("Source Library")
-    st.markdown(
-        "Browse the Stage 1 repository inventory of major public M&E indicator sources — "
-        "searchable by sector, organization, source type, and cross-cutting domain."
-    )
-
-    # Data quality note
-    with st.expander("ℹ️ Data quality note", expanded=False):
-        st.markdown(
-            """
-**Stage 1 — Repository-level inventory**
-
-This library catalogues *sources* (frameworks, registries, and guides), not individual indicators.
-Each record describes where a set of indicators can be found, along with its sector coverage,
-source type, and access links.
-
-- **Stage 2** (planned): per-indicator extraction from each source, enabling direct search and
-  selection of individual indicators for M&E frameworks.
-- All 22 records in this stage were manually verified as of **April 2026**.
-- `direct_file_url` links to a downloadable PDF/Excel where available; otherwise use `canonical_url`.
-"""
-        )
-
-    # Load data + read sidebar filter values
-    all_sources: list[SourceRecord] = load_sources()
-
-    _all_orgs = sorted({r.organization for r in all_sources})
-    _all_types = sorted({r.source_type for r in all_sources})
-
-    sl_sector: list[str] = st.session_state.get("sl_sector", [])
-    sl_domain: list[str] = st.session_state.get("sl_domain", [])
-    sl_active_only: bool = st.session_state.get("sl_active", True)
-
-    # Row 1: keyword search + sort
-    src_search_col, src_sort_col = st.columns([3, 1.5])
-    with src_search_col:
-        src_keyword = st.text_input(
-            "Search sources",
-            placeholder="Search by name, organization, sector or description…",
-            label_visibility="collapsed",
-        )
-    with src_sort_col:
-        src_sort = st.selectbox(
-            "Sort by",
-            ["Organization (A–Z)", "Framework (A–Z)", "Publication year (newest)", "Source ID"],
-            label_visibility="collapsed",
-        )
-
-    # Row 2: Organization + Source Type inline filters
-    org_col, type_col = st.columns(2)
-    with org_col:
-        sl_org = st.multiselect("Organization", _all_orgs, key="sl_org")
-    with type_col:
-        sl_type = st.multiselect("Source Type", _all_types, key="sl_type")
-
-    # Apply filters
-    filtered_sources = filter_sources(
-        all_sources,
-        sectors=sl_sector or None,
-        organizations=sl_org or None,
-        source_types=sl_type or None,
-        cross_cutting_domains=sl_domain or None,
-        active_only=sl_active_only,
-        keyword=src_keyword,
-    )
-
-    # Apply sort
-    if src_sort == "Organization (A–Z)":
-        filtered_sources.sort(key=lambda r: r.organization.lower())
-    elif src_sort == "Framework (A–Z)":
-        filtered_sources.sort(key=lambda r: r.framework_system.lower())
-    elif src_sort == "Publication year (newest)":
-        filtered_sources.sort(key=lambda r: r.publication_year or "0", reverse=True)
-    else:
-        filtered_sources.sort(key=lambda r: r.source_id)
-
-    # Result count + export buttons
-    count_col, csv_col, json_col = st.columns([3, 1, 1])
-    with count_col:
-        st.markdown(
-            f"**{len(filtered_sources)}** of **{len(all_sources)}** source(s) shown"
-        )
-    with csv_col:
-        st.download_button(
-            label="⬇️ CSV",
-            data=src_to_csv(filtered_sources).encode("utf-8"),
-            file_name="source_library.csv",
-            mime="text/csv",
-            use_container_width=True,
-            disabled=len(filtered_sources) == 0,
-        )
-    with json_col:
-        st.download_button(
-            label="⬇️ JSON",
-            data=src_to_json(filtered_sources).encode("utf-8"),
-            file_name="source_library.json",
-            mime="application/json",
-            use_container_width=True,
-            disabled=len(filtered_sources) == 0,
-        )
-
-    st.divider()
-
-    if not filtered_sources:
-        st.info("No sources match the current filters. Try adjusting the sidebar filters or clearing the search.")
-    else:
-        # Source detail cards
-        _SOURCE_TYPE_COLORS: dict[str, str] = {
-            "indicator registry":               "background:#dbeafe;color:#1e40af",
-            "metadata library":                 "background:#fef3c7;color:#92400e",
-            "donor framework":                  "background:#d1fae5;color:#065f46",
-            "survey indicator guide":           "background:#ede9fe;color:#5b21b6",
-            "survey instrument/question repository": "background:#fce7f3;color:#9d174d",
-            "humanitarian cluster registry":    "background:#ffedd5;color:#c2410c",
-            "indicator registry/metadata library": "background:#e0f2fe;color:#0369a1",
-        }
-
-        def _badge(label: str, css: str) -> str:
-            return f'<span style="{css};border-radius:4px;padding:2px 8px;font-size:12px;">{label}</span>'
-
-        for rec in filtered_sources:
-            type_css = _SOURCE_TYPE_COLORS.get(rec.source_type, "background:#f3f4f6;color:#374151")
-            header_badges = _badge(rec.source_type, type_css)
-            if rec.active_status == "Active":
-                header_badges += " " + _badge("Active", "background:#d1fae5;color:#065f46")
-
-            with st.expander(f"**{rec.framework_system}** — {rec.organization}", expanded=False):
-                st.markdown(header_badges, unsafe_allow_html=True)
-                st.markdown(f"**{rec.description}**")
-                st.divider()
-
-                meta_col1, meta_col2 = st.columns(2)
-                with meta_col1:
-                    st.markdown(f"**Source ID:** {rec.source_id}")
-                    st.markdown(f"**Organization:** {rec.organization}")
-                    st.markdown(f"**Sector:** {rec.sector}")
-                    if rec.cross_cutting_domain:
-                        st.markdown(f"**Cross-cutting domain:** {rec.cross_cutting_domain}")
-                with meta_col2:
-                    if rec.version:
-                        st.markdown(f"**Version:** {rec.version}")
-                    if rec.publication_year:
-                        st.markdown(f"**Publication year:** {rec.publication_year}")
-                    st.markdown(f"**Last accessed:** {rec.last_accessed}")
-                    st.markdown(f"**Status:** {rec.active_status}")
-
-                st.markdown(f"**Homepage / Canonical URL:** [{rec.canonical_url}]({rec.canonical_url})")
-                if rec.direct_file_url and rec.direct_file_url != rec.canonical_url:
-                    st.markdown(f"**Direct file download:** [{rec.direct_file_url}]({rec.direct_file_url})")

@@ -129,6 +129,7 @@ class MEIndicator:
     sector: str
     category: str
     source_url: str = ""
+    source_ids: list[str] = field(default_factory=list)
 
 
 @dataclass
