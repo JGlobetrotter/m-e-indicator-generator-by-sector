@@ -290,10 +290,13 @@ if page == "M&E Indicator Library":
             if any(s.lower() in r.sector.lower() for s in me_sector_filter)
         ]
 
-    # Sort: sources with most linked indicators first, then alpha
+    # Sort: SDG framework always last; others by indicator count desc then alpha
     filtered_sources.sort(
-        key=lambda r: (-len(get_indicators_for_source(r.source_id, all_me_indicators)),
-                       r.framework_system.lower())
+        key=lambda r: (
+            1 if r.source_id == "SRC022" else 0,
+            -len(get_indicators_for_source(r.source_id, all_me_indicators)),
+            r.framework_system.lower(),
+        )
     )
 
     # ── Global status + export bar ──────────────────────────────────────────
@@ -364,18 +367,23 @@ if page == "M&E Indicator Library":
                 st.caption(f"Select indicators from this source:")
                 _render_indicator_table(src_indicators, editor_key=f"ed_{rec.source_id}")
 
-    # ── Other Frameworks card (unlinked indicators) ──────────────────────────
-    unlinked_indicators = [ind for ind in all_me_indicators if not ind.source_ids]
+    # ── Other Frameworks card (unlinked non-ESG indicators only) ─────────────
+    _ESG_SECTOR = "Private Sector / ESG / Supply Chain"
+    unlinked_indicators = [
+        ind for ind in all_me_indicators
+        if not ind.source_ids and ind.sector != _ESG_SECTOR
+    ]
     if unlinked_indicators:
         other_count = len(unlinked_indicators)
         with st.expander(
-            f"**Other Frameworks** (GRI, SASB, TCFD, OHCHR, World Bank…)   ·   "
+            f"**Other Frameworks** (USAID sector codes, World Bank, ILO…)   ·   "
             f"*{other_count} indicator{'s' if other_count != 1 else ''} in library*",
             expanded=False,
         ):
             st.markdown(
-                "Indicators linked to frameworks not yet in the source library "
-                "(ESG standards, OHCHR, USAID sector-specific codes, World Bank)."
+                "Indicators linked to frameworks not yet catalogued as source records "
+                "(USAID DR/EG/ES codes, World Bank, ILO). "
+                "ESG/Private Sector indicators (GRI, SASB, TCFD) are in the KPI Library."
             )
             st.divider()
             _render_indicator_table(unlinked_indicators, editor_key="ed_other")
@@ -584,4 +592,22 @@ elif page == "KPI Library":
                     use_container_width=True,
                     type="primary",
                 )
+
+    # ── ESG / Private Sector Frameworks ─────────────────────────────────────
+    _esg_indicators = [
+        ind for ind in ME_INDICATORS
+        if ind.sector == "Private Sector / ESG / Supply Chain"
+    ]
+    st.divider()
+    with st.expander(
+        f"**ESG & Private Sector Frameworks** (GRI, SASB, TCFD, SA8000)   ·   "
+        f"*{len(_esg_indicators)} indicators*",
+        expanded=False,
+    ):
+        st.markdown(
+            "M&E indicators drawn from ESG reporting standards — "
+            "useful for private sector, supply chain, and corporate sustainability programs."
+        )
+        st.divider()
+        _render_indicator_table(_esg_indicators, editor_key="ed_esg")
 
