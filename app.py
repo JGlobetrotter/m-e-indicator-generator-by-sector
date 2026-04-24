@@ -125,7 +125,11 @@ def _get_selected_indicators() -> list[SelectedIndicator]:
 # ---------------------------------------------------------------------------
 
 with st.sidebar:
-    st.title("Impact Measurement Generator")
+    st.markdown(
+        "<h1 style='font-size:2rem;font-weight:800;line-height:1.2;margin-bottom:0.25rem'>"
+        "Impact Measurement Generator</h1>",
+        unsafe_allow_html=True,
+    )
     st.divider()
     page = st.radio(
         "Navigate",
@@ -241,7 +245,7 @@ def _render_indicator_table(
 
 if page == "M&E Indicator Library":
 
-    st.title("M&E Indicator Library")
+    st.header("M&E Indicator Library")
     st.markdown(
         "Browse indicator sources below, select indicators, then export your M&E framework. "
         "Add project details in the sidebar for export metadata."
@@ -276,6 +280,49 @@ if page == "M&E Indicator Library":
             "Sector", ME_SECTORS,
             placeholder="Sector…", label_visibility="collapsed",
         )
+
+    # ── Custom indicator button (inline, under search bar) ───────────────────
+    if st.button("➕ Add custom indicator"):
+        st.session_state.show_custom_form = not st.session_state.show_custom_form
+        st.rerun()
+
+    if st.session_state.show_custom_form:
+        with st.expander("New Custom Indicator", expanded=True):
+            with st.form("custom_indicator_form", clear_on_submit=True):
+                ci_col1, ci_col2 = st.columns(2)
+                with ci_col1:
+                    ci_title = st.text_input("Indicator Title *", placeholder="e.g., Number of beneficiaries trained")
+                    ci_method = st.text_input("Measurement Method", placeholder="e.g., Project records")
+                with ci_col2:
+                    ci_unit = st.text_input("Unit", placeholder="e.g., Number, %")
+                    ci_source_input = st.text_input("Data Source", placeholder="e.g., Project database")
+                ci_definition = st.text_area("Definition", placeholder="Describe what this indicator measures", height=80)
+                ci_submit = st.form_submit_button("Add Indicator", type="primary")
+
+            if ci_submit:
+                if not ci_title.strip():
+                    st.error("Indicator title is required.")
+                else:
+                    new_id = f"custom-{int(time.time() * 1000)}"
+                    new_ind = MEIndicator(
+                        id=new_id,
+                        title=ci_title.strip(),
+                        definition=ci_definition.strip() or "Custom indicator",
+                        measurement_method=ci_method.strip() or "To be defined",
+                        unit=ci_unit.strip() or "Number",
+                        frequency="quarterly",
+                        suggested_data_source=ci_source_input.strip() or "Project records",
+                        framework_source="Custom",
+                        sector="Custom",
+                        category="Output",
+                    )
+                    st.session_state.custom_indicators.append(new_ind)
+                    st.session_state.selections[new_id] = {
+                        "selected": True, "baseline": "", "target": "", "frequency": "quarterly",
+                    }
+                    st.session_state.show_custom_form = False
+                    st.success(f"Custom indicator '{new_ind.title}' added.")
+                    st.rerun()
 
     # Apply source filters
     filtered_sources = filter_sources(
@@ -339,98 +386,57 @@ if page == "M&E Indicator Library":
 
     st.divider()
 
-    # ── Source cards ─────────────────────────────────────────────────────────
-    for rec in filtered_sources:
-        src_indicators = get_indicators_for_source(rec.source_id, all_me_indicators)
-        ind_count = len(src_indicators)
-        count_label = f"{ind_count} indicator{'s' if ind_count != 1 else ''} in library"
+    # ── Source cards (only shown when a filter or search is active) ───────────
+    if not (me_search or me_type_filter or me_sector_filter):
+        st.info("Use the search box or filters above to browse indicator sources.")
+    else:
+        for rec in filtered_sources:
+            src_indicators = get_indicators_for_source(rec.source_id, all_me_indicators)
+            ind_count = len(src_indicators)
+            count_label = f"{ind_count} indicator{'s' if ind_count != 1 else ''} in library"
 
-        type_css = _SOURCE_TYPE_COLORS.get(rec.source_type, "background:#f3f4f6;color:#374151")
-        card_title = f"**{rec.framework_system}** — {rec.organization}   ·   *{count_label}*"
+            type_css = _SOURCE_TYPE_COLORS.get(rec.source_type, "background:#f3f4f6;color:#374151")
+            card_title = f"**{rec.framework_system}** — {rec.organization}   ·   *{count_label}*"
 
-        with st.expander(card_title, expanded=False):
-            badges = _badge(rec.source_type, type_css)
-            if rec.active_status == "Active":
-                badges += _badge("Active", "background:#d1fae5;color:#065f46")
-            if rec.sector:
-                badges += _badge(rec.sector[:40], "background:#f3f4f6;color:#374151")
-            st.markdown(badges, unsafe_allow_html=True)
-            st.markdown(rec.description)
+            with st.expander(card_title, expanded=False):
+                badges = _badge(rec.source_type, type_css)
+                if rec.active_status == "Active":
+                    badges += _badge("Active", "background:#d1fae5;color:#065f46")
+                if rec.sector:
+                    badges += _badge(rec.sector[:40], "background:#f3f4f6;color:#374151")
+                st.markdown(badges, unsafe_allow_html=True)
+                st.markdown(rec.description)
 
-            link_parts = [f"[{rec.canonical_url}]({rec.canonical_url})"]
-            if rec.direct_file_url and rec.direct_file_url != rec.canonical_url:
-                link_parts.append(f"[Direct download]({rec.direct_file_url})")
-            st.markdown("  ·  ".join(link_parts))
+                link_parts = [f"[{rec.canonical_url}]({rec.canonical_url})"]
+                if rec.direct_file_url and rec.direct_file_url != rec.canonical_url:
+                    link_parts.append(f"[Direct download]({rec.direct_file_url})")
+                st.markdown("  ·  ".join(link_parts))
 
-            if ind_count > 0:
+                if ind_count > 0:
+                    st.divider()
+                    st.caption(f"Select indicators from this source:")
+                    _render_indicator_table(src_indicators, editor_key=f"ed_{rec.source_id}")
+
+        # ── Other Frameworks card (unlinked non-ESG indicators only) ─────────
+        _ESG_SECTOR = "Private Sector / ESG / Supply Chain"
+        unlinked_indicators = [
+            ind for ind in all_me_indicators
+            if not ind.source_ids and ind.sector != _ESG_SECTOR
+        ]
+        if unlinked_indicators:
+            other_count = len(unlinked_indicators)
+            with st.expander(
+                f"**Other Frameworks** (USAID sector codes, World Bank, ILO…)   ·   "
+                f"*{other_count} indicator{'s' if other_count != 1 else ''} in library*",
+                expanded=False,
+            ):
+                st.markdown(
+                    "Indicators linked to frameworks not yet catalogued as source records "
+                    "(USAID DR/EG/ES codes, World Bank, ILO). "
+                    "ESG/Private Sector indicators (GRI, SASB, TCFD) are in the KPI Library."
+                )
                 st.divider()
-                st.caption(f"Select indicators from this source:")
-                _render_indicator_table(src_indicators, editor_key=f"ed_{rec.source_id}")
-
-    # ── Other Frameworks card (unlinked non-ESG indicators only) ─────────────
-    _ESG_SECTOR = "Private Sector / ESG / Supply Chain"
-    unlinked_indicators = [
-        ind for ind in all_me_indicators
-        if not ind.source_ids and ind.sector != _ESG_SECTOR
-    ]
-    if unlinked_indicators:
-        other_count = len(unlinked_indicators)
-        with st.expander(
-            f"**Other Frameworks** (USAID sector codes, World Bank, ILO…)   ·   "
-            f"*{other_count} indicator{'s' if other_count != 1 else ''} in library*",
-            expanded=False,
-        ):
-            st.markdown(
-                "Indicators linked to frameworks not yet catalogued as source records "
-                "(USAID DR/EG/ES codes, World Bank, ILO). "
-                "ESG/Private Sector indicators (GRI, SASB, TCFD) are in the KPI Library."
-            )
-            st.divider()
-            _render_indicator_table(unlinked_indicators, editor_key="ed_other")
-
-    # ── Custom indicator form ────────────────────────────────────────────────
-    st.divider()
-    if st.button("➕ Add custom indicator"):
-        st.session_state.show_custom_form = not st.session_state.show_custom_form
-        st.rerun()
-
-    if st.session_state.show_custom_form:
-        with st.expander("New Custom Indicator", expanded=True):
-            with st.form("custom_indicator_form", clear_on_submit=True):
-                ci_col1, ci_col2 = st.columns(2)
-                with ci_col1:
-                    ci_title = st.text_input("Indicator Title *", placeholder="e.g., Number of beneficiaries trained")
-                    ci_method = st.text_input("Measurement Method", placeholder="e.g., Project records")
-                with ci_col2:
-                    ci_unit = st.text_input("Unit", placeholder="e.g., Number, %")
-                    ci_source_input = st.text_input("Data Source", placeholder="e.g., Project database")
-                ci_definition = st.text_area("Definition", placeholder="Describe what this indicator measures", height=80)
-                ci_submit = st.form_submit_button("Add Indicator", type="primary")
-
-            if ci_submit:
-                if not ci_title.strip():
-                    st.error("Indicator title is required.")
-                else:
-                    new_id = f"custom-{int(time.time() * 1000)}"
-                    new_ind = MEIndicator(
-                        id=new_id,
-                        title=ci_title.strip(),
-                        definition=ci_definition.strip() or "Custom indicator",
-                        measurement_method=ci_method.strip() or "To be defined",
-                        unit=ci_unit.strip() or "Number",
-                        frequency="quarterly",
-                        suggested_data_source=ci_source_input.strip() or "Project records",
-                        framework_source="Custom",
-                        sector="Custom",
-                        category="Output",
-                    )
-                    st.session_state.custom_indicators.append(new_ind)
-                    st.session_state.selections[new_id] = {
-                        "selected": True, "baseline": "", "target": "", "frequency": "quarterly",
-                    }
-                    st.session_state.show_custom_form = False
-                    st.success(f"Custom indicator '{new_ind.title}' added.")
-                    st.rerun()
+                _render_indicator_table(unlinked_indicators, editor_key="ed_other")
 
 # ===========================================================================
 # PAGE 2 — KPI Library
@@ -610,4 +616,20 @@ elif page == "KPI Library":
         )
         st.divider()
         _render_indicator_table(_esg_indicators, editor_key="ed_esg")
+
+# ===========================================================================
+# Footer
+# ===========================================================================
+
+st.divider()
+st.markdown(
+    "<div style='text-align:center;color:#9ca3af;font-size:13px;padding:6px 0 12px'>"
+    "Built by <a href='https://navisignal.app' target='_blank' style='color:#6b7280;text-decoration:none'>"
+    "Navisignal.app</a> &nbsp;·&nbsp; "
+    "Questions or feedback? Email us at "
+    "<a href='mailto:hello@navisignal.app' style='color:#6b7280;text-decoration:none'>"
+    "hello@navisignal.app</a>"
+    "</div>",
+    unsafe_allow_html=True,
+)
 
